@@ -11,9 +11,6 @@ echo "Running tests with Cargo..."
     cd rubble
 
     cargo test
-
-    # Run the P-256 provider tests
-    cargo test --features ring -- ecdh
 )
 
 # Check that the device crates build with all feature combinations.
