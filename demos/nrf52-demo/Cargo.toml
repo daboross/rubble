@@ -11,7 +11,7 @@ edition = "2018"
 publish = false
 
 [dependencies]
-rubble = { path = "../../rubble", default-features = false }
+rubble = { path = "../../rubble", default-features = false, features = ["simple_queue"] }
 rubble-nrf5x = { path = "../../rubble-nrf5x" }
 demo-utils = { path = "../demo-utils" }
 cortex-m = "0.6.1"
