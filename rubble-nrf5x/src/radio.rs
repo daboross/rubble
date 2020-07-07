@@ -62,6 +62,7 @@ use rubble::link::{
 };
 use rubble::phy::{AdvertisingChannel, DataChannel};
 use rubble::time::{Duration, Instant};
+use rubble::TransmissionError;
 
 /// A packet buffer that can hold header and payload of any advertising or data channel packet.
 pub type PacketBuffer = [u8; MIN_PDU_BUF];
@@ -429,7 +430,7 @@ impl BleRadio {
 
     /// Transmit a PDU from the internal buffer.
     ///
-    /// This will block until the transmission has completed.
+    /// To block afterwards, use `block_on_transmission`.
     ///
     /// Assumes that all registers are correct for this type of transmission.
     fn transmit(&mut self) {
@@ -450,15 +451,19 @@ impl BleRadio {
 
             // ...and kick off the transmission
             self.radio.tasks_txen.write(|w| w.bits(1));
+        }
+    }
 
+    /// Blocks until the current transmission has been completed.
+    fn block_on_transmission(&mut self) {
+        while !self.radio.state.read().state().is_disabled() {
             // Then wait until disable event is triggered
             while self.radio.events_disabled.read().bits() == 0 {}
-
-            // "Subsequent reads and writes cannot be moved ahead of preceding reads."
-            compiler_fence(Ordering::Acquire);
-
-            // Now our `tx_buf` can be used again.
+            // Acknowledge disable event; TODO: is this correct?
+            self.radio.events_disabled.reset();
         }
+        // "Subsequent reads and writes cannot be moved ahead of preceding reads."
+        compiler_fence(Ordering::Acquire);
     }
 }
 
@@ -473,7 +478,30 @@ impl Transmitter for BleRadio {
         &mut self.tx_buf[2..]
     }
 
+    fn try_tx_payload_buf(&mut self) -> Option<&mut [u8]> {
+        if self.state().is_tx() {
+            // Don't give access to the buffer during ongoing transmissions
+            None
+        } else {
+            // "Subsequent reads and writes cannot be moved ahead of preceding reads."
+            compiler_fence(Ordering::Acquire);
+            // Leave 2 Bytes for the data/advertising PDU header.
+            Some(&mut self.tx_buf[2..])
+        }
+    }
+
     fn transmit_advertising(&mut self, header: advertising::Header, channel: AdvertisingChannel) {
+        self.block_on_transmission();
+        self.transmit_advertising_async(header, channel).expect("just blocked on transmission");
+        self.block_on_transmission();
+    }
+
+    fn transmit_advertising_async(&mut self, header: advertising::Header, channel: AdvertisingChannel) -> Result<(), TransmissionError>
+    {
+        if self.currently_transmitting() {
+            return Err(TransmissionError::TransmissionOngoing);
+        }
+
         let raw_header = header.to_u16();
         // S0 = 8 bits (LSB)
         self.tx_buf[0] = raw_header as u8;
@@ -489,14 +517,26 @@ impl Transmitter for BleRadio {
             .write(|w| unsafe { w.txaddress().bits(0) });
 
         self.transmit();
+
+        Ok(())
     }
 
     fn transmit_data(
         &mut self,
-        _access_address: u32,
-        _crc_iv: u32,
+        access_address: u32,
+        crc_iv: u32,
         header: data::Header,
-        _channel: DataChannel,
+        channel: DataChannel,
+    ) {
+        self.block_on_transmission();
+        self.transmit_data_async(access_address, crc_iv, header, channel);
+    }
+    fn transmit_data_async(
+        &mut self,
+        access_address: u32,
+        crc_iv: u32,
+        header: data::Header,
+        channel: DataChannel,
     ) {
         let raw_header = header.to_u16();
         // S0 = 8 bits (LSB)
@@ -523,5 +563,14 @@ impl Transmitter for BleRadio {
         self.radio
             .shorts
             .write(|w| w.ready_start().enabled().end_disable().disabled());
+    }
+
+    fn currently_transmitting(&mut self) -> bool {
+        // Then wait until disable event is triggered
+        let value = !self.radio.state.read().state().is_disabled();
+
+        // "Subsequent reads and writes cannot be moved ahead of preceding reads."
+        compiler_fence(Ordering::Acquire);
+        value
     }
 }

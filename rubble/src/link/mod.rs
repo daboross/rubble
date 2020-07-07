@@ -141,7 +141,7 @@ use self::advertising::{Pdu, PduBuf};
 use self::{ad_structure::AdStructure, seq_num::SeqNum};
 use crate::phy::{AdvertisingChannel, DataChannel};
 use crate::time::{Duration, Instant, Timer};
-use crate::{bytes::ByteReader, config::*, utils::HexSlice, Error};
+use crate::{bytes::ByteReader, config::*, utils::HexSlice, Error, error::TransmissionError};
 
 /// The CRC polynomial to use for CRC24 generation.
 ///
@@ -557,7 +557,30 @@ pub trait Transmitter {
     ///
     /// This buffer must not be changed. The BLE stack relies on the buffer to retain its old
     /// contents after transmitting a packet. A separate buffer must be used for received packets.
+    ///
+    /// # Blocking
+    ///
+    /// This method blocks until all currently ongoing transmissions are
+    /// completed. To return early instead, use [`try_tx_payload_buf`]
+    ///
+    /// [`try_tx_payload_buf`]: Transmitter::try_tx_payload_buf
+    /// # Result
+    ///
+    /// Will return `None` if there is currently an ongoing transmission. To
+    /// block instead, use [`tx_payload_buf_blocking`].
     fn tx_payload_buf(&mut self) -> &mut [u8];
+
+    /// Get a reference to the Transmitter's PDU payload buffer.
+    ///
+    /// See [`tx_payload_buf`]
+    ///
+    /// # Result
+    ///
+    /// Will method returns `None` if there is currently an ongoing transmission. To
+    /// block instead, use [`tx_payload_buf_blocking`].
+    ///
+    /// [`tx_payload_buf`]: Transmitter::tx_payload_buf
+    fn try_tx_payload_buf(&mut self) -> Option<&mut [u8]>;
 
     /// Transmit an Advertising Channel PDU.
     ///
@@ -572,7 +595,27 @@ pub trait Transmitter {
     ///
     /// * `header`: Advertising Channel PDU Header to prepend to the Payload in `payload_buf()`.
     /// * `channel`: Advertising Channel Index to transmit on.
+    ///
+    /// # Blocking
+    ///
+    /// This method will block on past transmissions, and then block until the
+    /// transmission is finished. To return immediately, use [`transmit_advertising_async`] instead.
+    ///
+    /// [`transmit_advertising_async`]: Transmitter::transmit_advertising_async
     fn transmit_advertising(&mut self, header: advertising::Header, channel: AdvertisingChannel);
+
+    /// Transmit an Advertising Channel PDU.
+    ///
+    /// This is a version of [`transmit_advertising`] which returns immediately after
+    /// initiating the transmission, rather than waiting for it to complete.
+    ///
+    /// # Errors
+    ///
+    /// If there is currently an outgoing transmission, this function returns [`TransmissionError::TransmissionOngoing`].
+    ///
+    /// [`transmit_advertising`]: Transmitter::transmit_advertising
+    /// [`TransmissionError::TransmissionOngoing`]: TransmissionError::TransmissionOngoing
+    fn transmit_advertising_async(&mut self, header: advertising::Header, channel: AdvertisingChannel) -> Result<(), TransmissionError>;
 
     /// Transmit a Data Channel PDU.
     ///
@@ -585,6 +628,13 @@ pub trait Transmitter {
     /// * `crc_iv`: CRC calculation initial value (`CRC_PRESET` for advertising channel).
     /// * `header`: Data Channel PDU Header to be prepended to the Payload in `payload_buf()`.
     /// * `channel`: Data Channel Index to transmit on.
+    ///
+    /// # Blocking
+    ///
+    /// This method will block on past transmissions, and then block until the
+    /// transmission is finished. To return immediately, use [`transmit_data_async`] instead.
+    ///
+    /// [`transmit_data_async`]: Transmitter::transmit_data_async
     fn transmit_data(
         &mut self,
         access_address: u32,
@@ -592,4 +642,30 @@ pub trait Transmitter {
         header: data::Header,
         channel: DataChannel,
     );
+
+    /// Transmit a Data Channel PDU.
+    ///
+    /// This is a version of [`transmit_data`] which returns immediately after
+    /// initiating the transmission, rather than waiting for it to complete.
+    ///
+    /// # Errors
+    ///
+    /// If there is currently an outgoing transmission, this function returns [`TransmissionError::TransmissionOngoing`].
+    ///
+    /// [`transmit_data`]: Transmitter::transmit_data
+    /// [`TransmissionError::TransmissionOngoing`]: TransmissionError::TransmissionOngoing
+    fn transmit_data_async(
+        &mut self,
+        access_address: u32,
+        crc_iv: u32,
+        header: data::Header,
+        channel: DataChannel,
+    );
+
+    /// Gets whether the link is currently transmitting or not. Will become true
+    /// after calling `transmit_advertising_async` or `transmit_data_async`.
+    ///
+    /// While true, the transmit buffer is off-limits, and no other
+    /// transmissions can be performed.
+    fn currently_transmitting(&mut self) -> bool;
 }

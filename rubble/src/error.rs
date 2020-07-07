@@ -37,3 +37,21 @@ impl fmt::Display for Error {
         })
     }
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum TransmissionError {
+    /// A transmission is already happening, another cannot be started immediately.
+    TransmissionOngoing,
+
+    #[doc(hidden)]
+    __Nonexhaustive,
+}
+
+impl fmt::Display for TransmissionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            TransmissionError::TransmissionOngoing => "existing transmission ongoing",
+            TransmissionError::__Nonexhaustive => unreachable!(),
+        })
+    }
+}

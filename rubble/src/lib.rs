@@ -44,7 +44,7 @@ pub mod security;
 pub mod time;
 pub mod uuid;
 
-pub use self::error::Error;
+pub use self::error::{Error, TransmissionError};
 
 use self::link::llcp::VersionNumber;
 
