@@ -75,6 +75,23 @@ pub enum AttributeAccessPermissions {
     ReadableAndWritable,
 }
 
+impl AttributeAccessPermissions {
+    fn can_read(&self) -> bool {
+        match self {
+            AttributeAccessPermissions::Readable
+            | AttributeAccessPermissions::ReadableAndWritable => true,
+            AttributeAccessPermissions::Writeable => false,
+        }
+    }
+    fn can_write(&self) -> bool {
+        match self {
+            AttributeAccessPermissions::Writeable
+            | AttributeAccessPermissions::ReadableAndWritable => true,
+            AttributeAccessPermissions::Readable => false,
+        }
+    }
+}
+
 /// Trait for attribute sets that can be hosted by an `AttributeServer`.
 pub trait AttributeProvider {
     /// Calls a closure `f` with every attribute whose handle is inside `range`, ascending.
@@ -120,7 +137,7 @@ pub trait AttributeProvider {
     ///
     /// Defaults to read-only. If this is overwritten, `write_attribute` should
     /// be overwritten.
-    fn attribute_access_permissions(&self, uuid: AttUuid) -> AttributeAccessPermissions {
+    fn attribute_access_permissions(&self, handle: Handle) -> AttributeAccessPermissions {
         AttributeAccessPermissions::Readable
     }
 
@@ -132,11 +149,7 @@ pub trait AttributeProvider {
     ///
     /// By default, panics on all writes. This should be overwritten if
     /// `attribute_access_permissions` is.
-    fn write_attribute(
-        &mut self,
-        uuid: AttUuid,
-        data: &[u8]
-    ) -> Result<(), Error> {
+    fn write_attribute(&mut self, handle: Handle, data: &[u8]) -> Result<(), Error> {
         unimplemented!("by default, no attributes should have write access permissions, and this should never be called");
     }
 }
